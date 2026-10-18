@@ -93,6 +93,53 @@ app.get("/api/profile", requireAuth, async (req, res) => {
   });
 });
 
+
+
+app.patch("/api/profile", requireAuth, async (req, res) => {
+  const userId = req.auth.userId;
+  const { full_name, phone } = req.body;
+
+  if (
+    typeof full_name !== "string" ||
+    typeof phone !== "string" ||
+    !full_name.trim() ||
+    !phone.trim()
+  ) {
+    return res.status(400).json({
+      message: "Please provide your full name and phone number.",
+    });
+  }
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      full_name: full_name.trim(),
+      phone: phone.trim(),
+    })
+    .eq("id", userId)
+    .select("id, full_name, phone, role")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Profile update failed:", error.message);
+    return res.status(500).json({
+      message: "Could not update your profile.",
+    });
+  }
+
+  if (!data) {
+    return res.status(404).json({
+      message: "Profile not found. Load your profile before updating it.",
+    });
+  }
+
+  return res.json({
+    message: "Profile updated successfully.",
+    profile: data,
+  });
+});
+
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
