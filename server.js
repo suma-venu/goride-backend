@@ -140,6 +140,91 @@ app.patch("/api/profile", requireAuth, async (req, res) => {
 });
 
 
+app.post("/api/rides", requireAuth, async (req, res) => {
+  try {
+    const riderId = req.auth.userId;
+
+    const { pickup_location, dropoff_location, ride_type, distance_km } =
+      req.body;
+
+    const allowedRideTypes = [
+      "GoRide Economy",
+      "GoRide Comfort",
+      "GoRide XL",
+    ];
+
+    if (
+      typeof pickup_location !== "string" ||
+      typeof dropoff_location !== "string" ||
+      !pickup_location.trim() ||
+      !dropoff_location.trim()
+    ) {
+      return res.status(400).json({
+        message: "Pickup and drop-off locations are required.",
+      });
+    }
+
+    if (!allowedRideTypes.includes(ride_type)) {
+      return res.status(400).json({
+        message: "Please select a valid ride type.",
+      });
+    }
+
+    if (
+      typeof distance_km !== "number" ||
+      !Number.isFinite(distance_km) ||
+      distance_km <= 0 ||
+      distance_km > 1000
+    ) {
+      return res.status(400).json({
+        message: "Please provide a valid route distance.",
+      });
+    }
+
+    const multiplier =
+      ride_type === "GoRide Comfort"
+        ? 1.5
+        : ride_type === "GoRide XL"
+          ? 1.8
+          : 1;
+
+    // Demo pricing; replace with server-verified routing/pricing later.
+    const fare = Math.round((40 + distance_km * 15) * multiplier);
+
+    const { data, error } = await supabase
+      .from("rides")
+      .insert({
+        rider_id: riderId,
+        pickup_location: pickup_location.trim(),
+        dropoff_location: dropoff_location.trim(),
+        ride_type,
+        fare,
+        status: "requested",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Ride creation failed:", error.message);
+      return res.status(500).json({
+        message: "Could not create your ride request.",
+      });
+    }
+
+    return res.status(201).json({
+      message: "Ride requested successfully.",
+      ride: data,
+    });
+  } catch (error) {
+    console.error("Ride request error:", error);
+
+    return res.status(500).json({
+      message: "An unexpected error occurred while requesting your ride.",
+    });
+  }
+});
+
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
