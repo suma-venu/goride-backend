@@ -140,7 +140,7 @@ app.patch("/api/profile", requireAuth, async (req, res) => {
 });
 
 
-app.post("/api/rides", requireAuth, async (req, res) => {
+app.post("/api/rides/:id/assign-driver", requireAuth, async (req, res) => {
   try {
     const riderId = req.auth.userId;
 
@@ -220,6 +220,109 @@ app.post("/api/rides", requireAuth, async (req, res) => {
 
     return res.status(500).json({
       message: "An unexpected error occurred while requesting your ride.",
+    });
+  }
+});
+
+
+app.post("/api/rides/:id/assign-driver", async (req, res) => {
+  try {
+    const { id } = req.params;
+const rideId = Number(req.params.id);
+
+if (!Number.isSafeInteger(rideId) || rideId <= 0) {
+  return res.status(400).json({ message: "Invalid ride ID." });
+}
+
+    // Confirm the ride exists and has not already been assigned.
+    const { data: ride, error: rideError } = await supabase
+      .from("rides")
+      .select("id, status")
+      .eq("id", rideId)
+      .maybeSingle();
+
+    if (rideError) throw rideError;
+
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+
+    if (ride.status !== "requested") {
+      return res.status(409).json({
+        message: "Only requested rides can be assigned.",
+      });
+    }
+
+    // Find one available driver.
+    const { data: drivers, error: driverError } = await supabase
+      .from("drivers")
+      .select("id, full_name, phone, vehicle_model, vehicle_number")
+      .eq("is_available", true)
+      .eq("status", "available")
+      .limit(1);
+
+    if (driverError) throw driverError;
+
+    if (!drivers || drivers.length === 0) {
+      return res.status(409).json({
+        message: "No available drivers right now.",
+      });
+    }
+
+    const driver = drivers[0];
+
+    // Claim the driver only if they are still available.
+    const { data: claimedDriver, error: claimError } = await supabase
+      .from("drivers")
+      .update({ is_available: false, status: "on_trip" })
+      .eq("id", driver.id)
+      .eq("is_available", true)
+      .eq("status", "available")
+      .select("id, full_name, phone, vehicle_model, vehicle_number")
+      .maybeSingle();
+
+    if (claimError) throw claimError;
+
+    if (!claimedDriver) {
+      return res.status(409).json({
+        message: "Driver was just assigned elsewhere. Please try again.",
+      });
+    }
+
+    const { data: updatedRide, error: updateError } = await supabase
+      .from("rides")
+      .update({
+        status: "assigned",
+        driver_id: claimedDriver.id,
+      })
+      .eq("id", id)
+      .eq("status", "requested")
+      .select()
+      .maybeSingle();
+
+    if (updateError || !updatedRide) {
+      // Release the driver if the ride could not be assigned.
+      await supabase
+        .from("drivers")
+        .update({ is_available: true, status: "available" })
+        .eq("id", claimedDriver.id);
+
+      if (updateError) throw updateError;
+
+      return res.status(409).json({
+        message: "Ride was already assigned. Please refresh and try again.",
+      });
+    }
+
+    return res.json({
+      message: "Driver assigned successfully.",
+      ride: updatedRide,
+      driver: claimedDriver,
+    });
+  } catch (error) {
+    console.error("Driver assignment failed:", error.message);
+    return res.status(500).json({
+      message: "Could not assign a driver.",
     });
   }
 });
